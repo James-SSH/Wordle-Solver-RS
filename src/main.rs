@@ -1,7 +1,8 @@
 use regex::Regex;
-use std::{fs, io::Read};
+use std::{collections::HashMap, fs, io::Read};
 
 fn main() {
+    let entropy = precompute_entropy();
     let mut valid_words = {
         let mut valid: String = String::from("");
         let _ = fs::File::open("./wordle.list")
@@ -73,12 +74,8 @@ fn main() {
             .collect();
         if valid_words.len() >= 2 {
             let mut display_clone = valid_words.clone();
-            display_clone.sort_unstable_by(|a, b| {
-                a.chars()
-                    .filter(|c| "aeiou".contains(*c))
-                    .count()
-                    .cmp(&b.chars().filter(|c| "aeiou".contains(*c)).count())
-            });
+            display_clone
+                .sort_unstable_by(|a, b| entropy.get(a).partial_cmp(&entropy.get(b)).unwrap());
             println!("Possible Words: {:?}", display_clone);
             drop(display_clone);
         } else {
@@ -124,7 +121,53 @@ fn get_word_info() -> Vec<WordleLetter> {
 }
 
 fn precompute_entropy() -> std::collections::HashMap<String, f32> {
-    todo!()
+    let mut letter_count: HashMap<char, u32> = HashMap::new();
+    letter_count.reserve(26);
+    for charpoint in 'a'..='z' {
+        letter_count.insert(charpoint, 0);
+    }
+    fs::File::open("./wordle.list")
+        .unwrap()
+        .bytes()
+        .for_each(|c| {
+            let c = c.unwrap();
+            if c != b'\n' {
+                letter_count.insert(
+                    c as char,
+                    letter_count.get(&(c as char)).expect(
+                        ("Got none on ".to_owned() + std::str::from_utf8(&[c]).unwrap()).as_str(),
+                    ) + 1,
+                );
+            }
+        });
+
+    let mut total: f32 = 0f32;
+    letter_count.values().for_each(|n| total += *n as f32);
+    let mut relative_frequency: HashMap<char, f32> = HashMap::new();
+    for (k, v) in letter_count.into_iter() {
+        relative_frequency.insert(k, v as f32 / total);
+    }
+
+    let words = {
+        let mut lines: String = String::from("");
+        let _ = fs::File::open("./wordle.list")
+            .unwrap()
+            .read_to_string(&mut lines);
+        let lines: Vec<String> = lines.lines().map(String::from).collect();
+        lines
+    };
+
+    let mut word_information: HashMap<String, f32> = HashMap::new();
+
+    for word in words.into_iter() {
+        let mut entropy = 0f32;
+        word.chars()
+            .collect::<std::collections::HashSet<char>>()
+            .iter()
+            .for_each(|c| entropy += relative_frequency.get(c).unwrap());
+        word_information.insert(word, -entropy.log2());
+    }
+    word_information
 }
 
 struct WordleLetter {
